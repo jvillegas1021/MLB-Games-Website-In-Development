@@ -96,172 +96,43 @@ for (year in year_range) {
   mlb_team_batting_stats_df_list[[as.character(year)]] <- mlb_team_year_df_list
 }
 
-mlb_team_batting_stats_df_list[["2024"]][["133"]]$roster_df
-mlb_team_batting_stats_df_list[["2025"]][["133"]]$roster_df
-mlb_team_batting_stats_df_list[["2026"]][["133"]]$roster_df
+# process team stats
+data_years <- names(mlb_team_batting_stats_df_list)
 
+mlb_team_batting_overall_stats_df_list <- c()
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-create_batter_identifier_df <- function(statsapi_df, statcast_df) {
+# team loop
+for (team in 1:nrow(mlb_teams)) {
   
-  batter_statsapi_identifier_df <- statsapi_df %>%
-    select(
-      xMLBAMID,
-      player_name,
-      gamesPlayed
-    )
+  team_batting_df_list <- c()
   
-  batter_statcast_identifier_df <- statcast_df %>%
-    select(
-      xMLBAMID,
-      raw_plate_appearances = plate_appearances
-    )
+  mlb_team_id <- as.character(mlb_teams[team, 2])
+  mlb_team_name <- as.character(mlb_teams[team, 3])
+  mlb_team_abbv <-as.character(mlb_teams[team, 8])
+
+  # year loop
+  for (year in data_years) {
   
-  batter_identifier_df <- batter_statsapi_identifier_df %>%
-    inner_join(
-      batter_statcast_identifier_df,
-      by = c('xMLBAMID' = 'xMLBAMID'),
-      relationship = 'one-to-one'
-    )
+  batting_df <- mlb_team_batting_stats_df_list[[year]][[mlb_team_id]][["roster_df"]]
   
-  return(batter_identifier_df)
+  team_batting_df_list[[length(team_batting_df_list) + 1]] <- batting_df
+  
+  complete_team_batting_df <- bind_rows(team_batting_df_list)
+  }
+  
+  processed_team_batting_df <- process_team_batting_stats(mlb_team_id,
+                                                          mlb_team_name,
+                                                          mlb_team_abbv,
+                                                          game_date,
+                                                          complete_team_batting_df)
+  
+  mlb_team_batting_overall_stats_df_list[[length(mlb_team_batting_overall_stats_df_list) + 1]] <- processed_team_batting_df
+  
 }
+  
+complete_team_batting_overall_stats <- bind_rows(mlb_team_batting_overall_stats_df_list)
 
-prepare_batter_stats_counts_df <- function(statsapi_df, statcast_df) {
-  
-  # join statsapi and statcast
-  combined_batter_data <- statsapi_df %>%
-    inner_join(
-      statcast_df,
-      by = c('xMLBAMID' = 'xMLBAMID'),
-      relationship = 'one-to-one'
-    )
-  
-  cleaned_batter_data <- combined_batter_data %>%
-    select(xMLBAMID,
-           runs,
-           doubles,
-           triples,
-           plate_appearances,
-           atBats,
-           homeRuns,
-           strikeouts,
-           baseOnBalls,
-           intentionalWalks,
-           hits,
-           hitByPitch,
-           stolenBases,
-           rbi,
-           groundIntoDoublePlay,
-           totalBases,
-           sacBunts,
-           sacFlies,
-           pitches,
-           walks,
-           pitches_outside_zone,
-           swings_outside_zone,
-           pitches_inside_zone,
-           swings_inside_zone,
-           whiffs,
-           swings,
-           first_pitch_strikes,
-           called_strikes,
-           batted_balls,
-           fly_balls,
-           ground_balls,
-           line_drives,
-           home_runs,
-           pop_ups,
-           barreled_balls,
-           hard_hits_balls,
-           contacted_balls,
-           contacted_balls_inside_zone,
-           contacted_balls_outside_zone,
-           ev_sum,
-           la_sum,
-           estimated_ba_using_speedangle_bip,
-           estimated_woba_using_speedangle_bip,
-           iso_value_bip,
-           estimated_slg_using_speedangle_bip,
-           babip_value_bip
-    )
-  
-  return(cleaned_batter_data)
-}
 
-process_batter_statcast_decay <- function(statcast_df = NULL, multiplier = 5) {
   
-  numeric_cols <- names(statcast_df %>% select(where(function(x) is.numeric(x))))
-  
-  decayed_statcast_df <- statcast_df %>%
-    mutate(
-      across(
-        all_of(numeric_cols),
-        ~.x * multiplier)
-    )
-}
+
+
