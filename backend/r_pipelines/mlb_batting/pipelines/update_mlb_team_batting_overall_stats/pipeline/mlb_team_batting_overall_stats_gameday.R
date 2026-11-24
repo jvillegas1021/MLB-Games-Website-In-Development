@@ -6,24 +6,13 @@ update_mlb_team_batting_stats_gameday <- function(game_date = as.Date(format(Sys
   
   
   print(paste0("Processing ", game_date, ", ", current_season))
-  # extract batting_rosters_gameday
+  
   if (is.null(mlb_batting_roster_gameday_df) || nrow(mlb_batting_roster_gameday_df) == 0) {
     mlb_batting_roster_gameday_df <- get_data_from_database('mlb_batting_rosters_gameday')
   } else {
     mlb_batting_roster_gameday_df <- mlb_batting_roster_gameday_df
   }
-  # extract statsapi data
-  if (is.null(batter_stats_statsapi_df) || nrow(batter_stats_statsapi_df) == 0) {
-    batter_stats_statsapi_df <- get_data_from_database('batter_seasonal_data_statcast')
-  } else {
-    batter_stats_statcast_df <- batter_stats_statcast_df
-  }
-  # extract statcast data
-  if (is.null(batter_stats_statcast_df) || nrow(batter_stats_statcast_df) == 0) {
-    batter_stats_statcast_df <- get_data_from_database('batter_seasonal_data_statcast')
-  } else {
-    batter_stats_statcast_df <- batter_stats_statcast_df
-  }
+  
   # extract teams
   if (is.null(mlb_teams) || nrow(mlb_teams) == 0) {
     mlb_teams <- mlb_teams(season = current_season, sport_ids = sports_id)
@@ -31,15 +20,13 @@ update_mlb_team_batting_stats_gameday <- function(game_date = as.Date(format(Sys
     mlb_teams <- mlb_teams
   }
   
-  
-  
-  
   historical_table_name <- paste0('team_batting_overall_stats_', current_season)
   
-  year_range <- seq(from = current_year, to = (current_season - 2))
+  year_range <- seq(from = current_season, to = (current_season - 2))
   
-  team_batting_stats_counts_df_list <- c()
+  mlb_team_batting_stats_df_list <- c()
   
+  # for year loop
   for (year in year_range) {
     
     statsapi_table <- paste0('batter_statsapi_counts_', year)
@@ -48,44 +35,99 @@ update_mlb_team_batting_stats_gameday <- function(game_date = as.Date(format(Sys
     batter_statsapi_df <- get_data_from_database(statsapi_table)
     batter_statcast_df <- get_data_from_database(statcast_table)
     
-    batter_identifier_df <- create_batter_identifier_df(batter_statsapi_df, batter_statcast_df)
+    mlb_team_year_df_list <- c()
     
-    prepared_batter_stat_counts_df <- prepare_batter_stats_counts_df(batter_statsapi_df, batter_statcast_df)
-    
-    max_year <- current_year
-    multiplier <- 5
-    
-    if (max_year - year == 2) {
-      multiplier <- 2
-    } else if (max_year - year == 1) {
-      multiplier <- 3
-    } else {
+    # for team loop
+    for (team in 1:nrow(mlb_teams)) {
+      
+      mlb_team_id <- as.character(mlb_teams[team, 2])
+      mlb_team_name <- as.character(mlb_teams[team, 3])
+      mlb_team_abbv <-as.character(mlb_teams[team, 8])
+      
+      lineup_ids <- mlb_batting_roster_gameday_df %>%
+        filter(roster_date == game_date,
+               team_id == mlb_team_id) %>%
+        pull(roster_lineup_ids)
+      
+      
+      split_up_linup_ids <- str_split(lineup_ids, ",") %>% unlist()
+      
+      filtered_batter_statsapi <- batter_statsapi_df %>%
+        filter(xMLBAMID %in% split_up_linup_ids)
+      
+      filtered_batter_statcast <- batter_statcast_df %>%
+        filter(xMLBAMID %in% split_up_linup_ids)
+      
+      batter_identifier_df <- create_batter_identifier_df(filtered_batter_statsapi, filtered_batter_statcast)
+      
+      prepared_batter_stat_counts_df <- prepare_batter_stats_counts_df(filtered_batter_statsapi, filtered_batter_statcast)
+      
+      max_year <- current_season
       multiplier <- 5
+      
+      if (max_year - year == 2) {
+        multiplier <- 2
+      } else if (max_year - year == 1) {
+        multiplier <- 3
+      } else {
+        multiplier <- 5
+      }
+      
+      prepared_batter_stat_counts_df <- process_batter_statcast_decay(prepared_batter_stat_counts_df, multiplier = multiplier)
+      
+      final_batter_stat_counts_df <- batter_identifier_df %>%
+        inner_join(
+          prepared_batter_stat_counts_df,
+          by = ('xMLBAMID')
+        )
+      
+      mlb_team_year_df_list[[as.character(mlb_team_id)]] <- list(
+        team_id = mlb_team_id,
+        team_name = mlb_team_name,
+        team_abbv = mlb_team_abbv,
+        roster_df = final_batter_stat_counts_df
+      )
     }
     
-    prepared_batter_stat_counts_df <- process_batter_statcast_decay(prepared_batter_stat_counts_df, multiplier = multiplier)
+    mlb_team_batting_stats_df_list[[as.character(year)]] <- mlb_team_year_df_list
+  }
+  
+  # process team stats
+  data_years <- names(mlb_team_batting_stats_df_list)
+  
+  mlb_team_batting_overall_stats_df_list <- c()
+  
+  # team loop
+  for (team in 1:nrow(mlb_teams)) {
     
-    final_batter_stat_counts_df <- batter_identifier_df %>%
-      inner_join(
-        prepared_batter_stat_counts_df,
-        by = ('xMLBAMID')
-      )
+    team_batting_df_list <- c()
     
-    batter_stats_counts_df_list[[length(batter_stats_counts_df_list) + 1]] <- final_batter_stat_counts_df    
+    mlb_team_id <- as.character(mlb_teams[team, 2])
+    mlb_team_name <- as.character(mlb_teams[team, 3])
+    mlb_team_abbv <-as.character(mlb_teams[team, 8])
+    
+    # year loop
+    for (year in data_years) {
+      
+      batting_df <- mlb_team_batting_stats_df_list[[year]][[mlb_team_id]][["roster_df"]]
+      
+      team_batting_df_list[[length(team_batting_df_list) + 1]] <- batting_df
+      
+      complete_team_batting_df <- bind_rows(team_batting_df_list)
+    }
+    
+    processed_team_batting_df <- process_team_batting_stats(mlb_team_id,
+                                                            mlb_team_name,
+                                                            mlb_team_abbv,
+                                                            game_date,
+                                                            complete_team_batting_df)
+    
+    mlb_team_batting_overall_stats_df_list[[length(mlb_team_batting_overall_stats_df_list) + 1]] <- processed_team_batting_df
     
   }
   
-  batter_stat_counts_df <- bind_rows(batter_stats_counts_df_list)
+  complete_team_batting_overall_stats <- bind_rows(mlb_team_batting_overall_stats_df_list)
   
-  processed_batter_stats_df <- process_batter_statcast_stats(batter_stat_counts_df)
-  
-  sample_sized_batter_stats_df <- process_batter_statcast_small_sample_size_batters(processed_batter_stats_df)
-  
-  batters_to_update <- sample_sized_batter_stats_df$xMLBAMID
-  
-  delete_batter_stats_from_df(historical_table_name, batters_to_update)
-  
-  write_df_to_sql_append(sample_sized_batter_stats_df, historical_table_name)
   
 }
   

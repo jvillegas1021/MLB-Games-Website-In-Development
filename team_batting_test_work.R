@@ -5,134 +5,146 @@ library(glmnet)
 library(caret)
 library(baseballr)
 
-game_date = as.Date(format(Sys.time(), tz = "America/New_York"))
-current_season = as.numeric(format(Sys.Date(), "%Y"))
-sports_id = 1
-mlb_batting_roster_gameday_df = NULL
+################ CALCULATE BATTING SCORE WEIGHTS FOR STATS ##################
 
-# extract mlb roster lineups gameday
-if (is.null(mlb_batting_roster_gameday_df) || nrow(mlb_batting_roster_gameday_df) == 0) {
-  mlb_batting_roster_gameday_df <- get_data_from_database('mlb_batting_rosters_gameday')
-} else {
-  mlb_batting_roster_gameday_df <- mlb_batting_roster_gameday_df
+
+
+# 1. CORE DISCIPLINE 
+block_discipline <- c('K%', 'BB%', 'Z-Swing%', 'Chase%', 'Whiff%', 'F-Strike%', 'CStr%', 'C+SwStr%')
+block_contact     <- c('GB%', 'FB%', 'LD%', 'PU', 'GB/FB', 'HR/FB', 'IFFB%', 'Barrel%', 'HardHit%',
+                       'Z-Contact%', 'O-Contact%', 'Contact%', 'EV', 'LA')
+block_creation  <- c('wRC+', 'wOBA', 'wRAA', 'wRC')
+block_results <- c('AVG', 'OBP', 'SLG', 'OPS', 'BABIP')
+block_expected   <- c('xwOBA', 'xBA', 'xSLG', 'xISO', 'xBABIP')
+
+
+# Create a master list of all tracking stats to clean in the next step
+all_stats_to_clean <- c(block_discipline, block_contact, block_creation, block_results, block_expected)
+
+# 1. Combine all your block stats plus runs_scored into one master list
+all_numeric_cols <- c(all_stats_to_clean, 'wOBA_fg')
+
+# 2. Force every stat column to be numeric (fixes character/factor text issues)
+team_batting_df[all_numeric_cols] <- lapply(
+  team_batting_df[all_numeric_cols], 
+  function(x) as.numeric(as.character(x))
+)
+
+# 3. Clean up NA values by replacing them with the league average for that stat
+for (col in all_numeric_cols) {
+  if (any(is.na(team_batting_df[[col]]))) {
+    league_avg <- mean(team_batting_df[[col]], na.rm = TRUE)
+    
+    # If a stat is completely blank for some reason, default to 0
+    if (is.na(league_avg)) league_avg <- 0 
+    
+    team_batting_df[[col]][is.na(team_batting_df[[col]])] <- league_avg
+  }
 }
 
-# extract teams
-if (is.null(mlb_teams) || nrow(mlb_teams) == 0) {
-  mlb_teams <- mlb_teams(season = current_season, sport_ids = sports_id)
-} else {
-  mlb_teams <- mlb_teams
-}
 
-historical_table_name <- paste0('team_batting_overall_stats_', current_season)
+# 1. Create a structured list linking each block to its specific stats
+blocks_list <- list(
+  Discipline = block_discipline,
+  Contact   = block_contact,
+  Creation = block_creation,
+  Results = block_results,
+  Expected   = block_expected
+)
 
-year_range <- seq(from = current_season, to = (current_season - 2))
 
-mlb_team_batting_stats_df_list <- c()
+# 2. Define a master vector of stats where LOWER values are better.
+# Any stat NOT on this list will automatically be treated as "Positive/Higher is better".
+negative_stats <- c(
+  'K%', 'Chase%', 'Whiff%', 'GB%', 'IFFB%', 'GB/FB')
 
-# for year loop
-for (year in year_range) {
+# Loop through each of the 7 skill blocks
+for (block_name in names(blocks_list)) {
   
-  statsapi_table <- paste0('batter_statsapi_counts_', year)
-  statcast_table <- paste0('batter_statcast_counts_', year)
+  # 1. Pull the specific stats for this current block
+  block_stats <- blocks_list[[block_name]]
   
-  batter_statsapi_df <- get_data_from_database(statsapi_table)
-  batter_statcast_df <- get_data_from_database(statcast_table)
+  # 2. Extract and format the matrix safely
+  X_raw <- team_batting_df %>% select(all_of(block_stats))
+  X_mat <- data.matrix(X_raw)
   
-  mlb_team_year_df_list <- c()
+  # Safety Check: If a column has 0 variance (all values are identical), 
+  # scaling it creates NaNs. We replace those NaNs with 0 to prevent glmnet from crashing.
+  X_scaled <- scale(X_mat)
+  X_scaled[is.na(X_scaled)] <- 0
   
-  # for team loop
-  for (team in 1:nrow(mlb_teams)) {
+  y_raw <- team_batting_df$wOBA_fg
+  y_scaled <- as.vector(scale(y_raw))
+  
+  # 3. Fit the Ridge Regression model for this block
+  ridge_model <- cv.glmnet(X_scaled, y_scaled, alpha = 0)
+  
+  # 4. Extract importance weights (coefficients) and normalize them to sum to 1.00
+  raw_coefficients <- as.vector(as.matrix(coef(ridge_model, s = "lambda.min")))[-1] 
+  
+  # Safety Check: If a coefficient is NaN due to zero variance, force it to 0
+  raw_coefficients[is.na(raw_coefficients)] <- 0
+  
+  # Ensure we don't divide by zero if all weights happen to be zero
+  sum_coefs <- sum(abs(raw_coefficients))
+  if (sum_coefs == 0) sum_coefs <- 1
+  
+  normalized_weights <- abs(raw_coefficients) / sum_coefs
+  
+  # 5. Build an internal matrix to store component points for each team
+  team_component_points <- matrix(0, nrow = nrow(team_batting_df), ncol = length(block_stats))
+  
+  # 6. Calculate the scores for each individual stat in the block
+  for (i in 1:length(block_stats)) {
+    stat_name <- block_stats[i]
+    weight    <- normalized_weights[i]
     
-    mlb_team_id <- as.character(mlb_teams[team, 2])
-    mlb_team_name <- as.character(mlb_teams[team, 3])
-    mlb_team_abbv <-as.character(mlb_teams[team, 8])
+    # Calculate team Z-scores for this stat
+    stat_values <- team_batting_df[[stat_name]]
     
-    lineup_ids <- mlb_batting_roster_gameday_df %>%
-      filter(roster_date == game_date,
-             team_id == mlb_team_id) %>%
-      pull(roster_lineup_ids)
+    stat_mean <- mean(stat_values, na.rm = TRUE)
+    stat_sd   <- sd(stat_values, na.rm = TRUE)
     
-    
-    split_up_linup_ids <- str_split(lineup_ids, ",") %>% unlist()
-    
-    filtered_batter_statsapi <- batter_statsapi_df %>%
-      filter(xMLBAMID %in% split_up_linup_ids)
-    
-    filtered_batter_statcast <- batter_statcast_df %>%
-      filter(xMLBAMID %in% split_up_linup_ids)
-    
-    batter_identifier_df <- create_batter_identifier_df(filtered_batter_statsapi, filtered_batter_statcast)
-    
-    prepared_batter_stat_counts_df <- prepare_batter_stats_counts_df(filtered_batter_statsapi, filtered_batter_statcast)
-    
-    max_year <- current_season
-    multiplier <- 5
-    
-    if (max_year - year == 2) {
-      multiplier <- 2
-    } else if (max_year - year == 1) {
-      multiplier <- 3
+    # Safety Check for Z-Score standard deviation dividing by zero
+    if (is.na(stat_sd) || stat_sd == 0) {
+      z_scores <- rep(0, length(stat_values))
     } else {
-      multiplier <- 5
+      z_scores <- (stat_values - stat_mean) / stat_sd
     }
     
-    prepared_batter_stat_counts_df <- process_batter_statcast_decay(prepared_batter_stat_counts_df, multiplier = multiplier)
+    # If the stat is on our negative list (like K% or Whiff%), flip the sign 
+    if (stat_name %in% negative_stats) {
+      z_scores <- z_scores * -1
+    }
     
-    final_batter_stat_counts_df <- batter_identifier_df %>%
-      inner_join(
-        prepared_batter_stat_counts_df,
-        by = ('xMLBAMID')
-      )
-    
-    mlb_team_year_df_list[[as.character(mlb_team_id)]] <- list(
-      team_id = mlb_team_id,
-      team_name = mlb_team_name,
-      team_abbv = mlb_team_abbv,
-      roster_df = final_batter_stat_counts_df
-    )
+    # Multiply by the ridge importance weight
+    team_component_points[, i] <- z_scores * weight
   }
   
-  mlb_team_batting_stats_df_list[[as.character(year)]] <- mlb_team_year_df_list
+  # 7. Sum the individual components together to get the raw composite score
+  raw_composite_score <- rowSums(team_component_points, na.rm = TRUE)
+  
+  # 8. Scale to our classic Index scale (Mean = 100, Standard Deviation = 15)
+  avg_comp <- mean(raw_composite_score, na.rm = TRUE)
+  sd_comp  <- sd(raw_composite_score, na.rm = TRUE)
+  
+  if (is.na(sd_comp) || sd_comp == 0) sd_comp <- 1
+  
+  index_score <- 100 + ((raw_composite_score - avg_comp) / sd_comp) * 15
+  
+  # 9. Apply your custom logic: Divide by 10 to turn the 100-baseline index into a clean points scale!
+  final_points_score <- round(index_score / 10, 2)
+  
+  # 10. Append this new score column to your final scores dataframe
+  column_output_name <- paste0("score_", tolower(block_name))
+  final_team_scores_df[[column_output_name]] <- final_points_score
 }
 
-# process team stats
-data_years <- names(mlb_team_batting_stats_df_list)
 
-mlb_team_batting_overall_stats_df_list <- c()
-
-# team loop
-for (team in 1:nrow(mlb_teams)) {
-  
-  team_batting_df_list <- c()
-  
-  mlb_team_id <- as.character(mlb_teams[team, 2])
-  mlb_team_name <- as.character(mlb_teams[team, 3])
-  mlb_team_abbv <-as.character(mlb_teams[team, 8])
-
-  # year loop
-  for (year in data_years) {
-  
-  batting_df <- mlb_team_batting_stats_df_list[[year]][[mlb_team_id]][["roster_df"]]
-  
-  team_batting_df_list[[length(team_batting_df_list) + 1]] <- batting_df
-  
-  complete_team_batting_df <- bind_rows(team_batting_df_list)
-  }
-  
-  processed_team_batting_df <- process_team_batting_stats(mlb_team_id,
-                                                          mlb_team_name,
-                                                          mlb_team_abbv,
-                                                          game_date,
-                                                          complete_team_batting_df)
-  
-  mlb_team_batting_overall_stats_df_list[[length(mlb_team_batting_overall_stats_df_list) + 1]] <- processed_team_batting_df
-  
-}
-  
-complete_team_batting_overall_stats <- bind_rows(mlb_team_batting_overall_stats_df_list)
+final_team_scores_df <- final_team_scores_df %>%
+  mutate(
+    update_date = Sys.time())
 
 
-  
 
 
