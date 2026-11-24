@@ -7,8 +7,7 @@ get_all_active_mlb_batters <- function() {
   
   batter_df <- players_df %>%
     filter((primaryPosition.type != 'Pitcher' |
-              primaryPosition.type == 'Two-Way Player'),
-           active == TRUE)
+              primaryPosition.type == 'Two-Way Player'))
   
   cleaned_batter_df <- batter_df %>%
     mutate(id = as.character(id)) %>%

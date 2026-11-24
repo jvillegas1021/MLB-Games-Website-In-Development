@@ -15,5 +15,3 @@ update_active_mlb_batter_statsapi_counts()
 print("Updated Active MLB batters STATSAPI counts.")
 
 
-
-

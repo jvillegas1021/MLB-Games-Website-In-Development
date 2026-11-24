@@ -47,7 +47,7 @@ write_df_to_sql_append <- function(df, table_name) {
   dbDisconnect(con)
 }
 
-delete_pitcher_stats_from_df <- function(table_name, pitcher_ids) {
+delete_batter_stats_from_df <- function(table_name, batter_ids) {
   con <- dbConnect(
     RPostgres::Postgres(),
     host = Sys.getenv("DB_HOST"),
@@ -58,13 +58,13 @@ delete_pitcher_stats_from_df <- function(table_name, pitcher_ids) {
     sslmode = Sys.getenv("DB_SSLMODE")
   )
   
-  quoted_pitcher_ids <- sprintf("'%s'", pitcher_ids)
-  pitcher_id_string <- paste(quoted_pitcher_ids, collapse = ",")
+  quoted_batter_ids <- sprintf("'%s'", batter_ids)
+  batter_id_string <- paste(quoted_batter_ids, collapse = ",")
   
-  query <- sprintf('DELETE FROM %s WHERE "xMLBAMID" IN (%s)', table_name, pitcher_id_string)
+  query <- sprintf('DELETE FROM %s WHERE "xMLBAMID" IN (%s)', table_name, batter_id_string)
   
   rows_affected <- dbExecute(con, query)
-  print(paste("Successfully deleted", rows_affected, "pitcher record rows from database."))
+  print(paste("Successfully deleted", rows_affected, "batter record rows from database."))
   
   # 4. Clean up connection channel
   dbDisconnect(con)
