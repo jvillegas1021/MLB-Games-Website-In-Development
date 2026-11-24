@@ -1,5 +1,3 @@
-
-
 update_mlb_batting_rosters_gameday <- function(game_date = as.Date(format(Sys.time(), tz = "America/New_York"))) {
   #set parameters
   current_season <- substr(game_date, start = 1, stop = 4)
@@ -18,7 +16,7 @@ update_mlb_batting_rosters_gameday <- function(game_date = as.Date(format(Sys.ti
   }
   
   #load to database
-  write_df_to_sql_append('mlb_batting_rosters_gameday', mlb_batting_roster_final)
+  write_df_to_sql_append(mlb_batting_roster_final, 'mlb_batting_rosters_gameday')
 }
 
 
