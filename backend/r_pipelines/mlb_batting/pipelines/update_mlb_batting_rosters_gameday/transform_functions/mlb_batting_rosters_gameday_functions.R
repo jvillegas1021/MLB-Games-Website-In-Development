@@ -33,7 +33,7 @@ create_mlb_batting_rosters_gameday <- function(mlb_team_df, current_season, game
     mlb_batting_rosters_list[[length(mlb_batting_rosters_list) + 1]] <- mlb_batting_roster
   }
   
- 
+  
   mlb_batting_roster_final <- bind_rows(mlb_batting_rosters_list)
   
   return(mlb_batting_roster_final)

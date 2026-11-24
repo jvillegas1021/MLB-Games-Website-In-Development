@@ -170,7 +170,7 @@ calculate_pitcher_scores <- function(pitcher_statcast_df, pitcher_fg_df, game_da
   training_df <- pitcher_df %>% 
     filter(!is.na(SIERA))
   
-
+  
   training_df[all_numeric_cols] <- lapply(training_df[all_numeric_cols], function(x) as.numeric(as.character(x)))
   pitcher_df[all_stats_to_clean] <- lapply(pitcher_df[all_stats_to_clean], function(x) as.numeric(as.character(x)))
   
@@ -270,7 +270,7 @@ calculate_pitcher_scores <- function(pitcher_statcast_df, pitcher_fg_df, game_da
     mutate(
       game_date = game_date,
       update_date = Sys.time()
-      )
+    )
   
   return(final_pitcher_scores_df)
 }
