@@ -120,7 +120,7 @@ process_team_batting_stats <- function(mlb_team_name,
   league_woba <- 0.316
   wOBAScale <- 1.238
   R_PA_lg <- 0.118
-  
+  lg_wSB <- -0.410
   
   processed_batter_statcast_df <- team_batting_stats_df %>%
     mutate(
@@ -140,6 +140,8 @@ process_team_batting_stats <- function(mlb_team_name,
       hr        = as.numeric(sum(homeRuns, na.rm = TRUE)),
       b1        = h - (b2 + b3 + hr),
       woba_denom = as.numeric(sum(obp_denom_row, na.rm = TRUE)),
+      sb       = as.numeric(sum(stolenBases, na.rm = TRUE)),
+      cs       = as.numeric(sum(caughtStealing, na.rm = TRUE)),
       
       # Control block
       `BB%`       = if_else(pa == 0, 0, bb / pa),
@@ -150,12 +152,13 @@ process_team_batting_stats <- function(mlb_team_name,
       `F-Strike%` = if_else(pa == 0, 0, sum(first_pitch_strikes, na.rm = TRUE) / pa),
       `CStr%`     = if_else(sum(pitches, na.rm = TRUE) == 0, 0, sum(called_strikes, na.rm = TRUE) / sum(pitches, na.rm = TRUE)),
       `C+SwStr%`  = if_else(sum(pitches, na.rm = TRUE) == 0, 0, (sum(called_strikes, na.rm = TRUE) + sum(whiffs, na.rm = TRUE)) / sum(pitches, na.rm = TRUE)),
+      `Zone%`     = if_else(sum(pitches) == 0, 0, sum(pitches_inside_zone) / sum(pitches)),
+      `SwStr%`    = if_else(sum(pitches) == 0, 0, sum(whiffs) / sum(pitches)),
       
       # Contact block
       `GB%`        = if_else(sum(batted_balls, na.rm = TRUE) == 0, 0, sum(ground_balls, na.rm = TRUE) / sum(batted_balls, na.rm = TRUE)),
       `FB%`        = if_else(sum(batted_balls, na.rm = TRUE) == 0, 0, sum(fly_balls, na.rm = TRUE) / sum(batted_balls, na.rm = TRUE)),
       `LD%`        = if_else(sum(batted_balls, na.rm = TRUE) == 0, 0, sum(line_drives, na.rm = TRUE) / sum(batted_balls, na.rm = TRUE)),
-      `PU%`        = if_else(sum(batted_balls, na.rm = TRUE) == 0, 0, sum(pop_ups, na.rm = TRUE) / sum(batted_balls, na.rm = TRUE)),
       `GB/FB`      = if_else(sum(fly_balls, na.rm = TRUE) == 0, 0, sum(ground_balls, na.rm = TRUE) / sum(fly_balls, na.rm = TRUE)),
       `HR/FB`      = if_else(sum(fly_balls, na.rm = TRUE) == 0, 0, hr / sum(fly_balls, na.rm = TRUE)),
       `IFFB%`      = if_else(sum(fly_balls, na.rm = TRUE) == 0, 0, sum(pop_ups, na.rm = TRUE) / sum(fly_balls, na.rm = TRUE)),
@@ -172,7 +175,12 @@ process_team_batting_stats <- function(mlb_team_name,
       wOBA     = if_else(woba_denom == 0, 0, woba_num / woba_denom),
       wRAA     = if_else(pa == 0, 0, ((wOBA - league_woba) / wOBAScale) * pa),
       wRC      = wRAA + (R_PA_lg * pa),
+      `wRC/PA` = if_else(pa == 0, 0, wRC / pa),
       `wRC+`   = if_else(pa == 0, 0, 100 * (((wRAA / pa) / R_PA_lg) + 1)),
+      wSB      = (sb * 0.20) + (cs * -0.40) - (lg_wSB * (b1 + bb + hbp)),
+      RC       = if_else((ab + bb + hbp + sf) == 0, 0, 
+                         ((h + bb + hbp - cs) * (tb + (0.26 * (bb + hbp)) + (0.52 * (sf + sb)))) / 
+                           (ab + bb + hbp + sf)),
       
       # Results block
       `AVG`   = if_else(ab == 0, 0, h / ab),
@@ -180,6 +188,7 @@ process_team_batting_stats <- function(mlb_team_name,
       `OBP`   = if_else(woba_denom == 0, 0, sum(obp_num_row, na.rm = TRUE) / woba_denom),
       `SLG`   = if_else(ab == 0, 0, sum(totalBases, na.rm = TRUE) / ab),  
       `OPS`   = `OBP` + `SLG`,
+      `ISO`   = `SLG` - `AVG`,
       
       # Expected block
       `xBA`    = if_else(ab == 0, 0, sum(estimated_ba_using_speedangle_bip, na.rm = TRUE) / ab),
@@ -213,7 +222,6 @@ process_team_batting_stats <- function(mlb_team_name,
       `GB%`,
       `FB%`,
       `LD%`,
-      `PU%`,
       `GB/FB`,
       `HR/FB`,
       `IFFB%`,
@@ -233,6 +241,7 @@ process_team_batting_stats <- function(mlb_team_name,
       SLG,
       OPS,
       BABIP,
+      ISO,
       xBA,
       xwOBA,
       xSLG,

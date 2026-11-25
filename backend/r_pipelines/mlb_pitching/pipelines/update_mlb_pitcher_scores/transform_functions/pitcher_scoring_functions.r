@@ -4,10 +4,10 @@
 calculate_pitcher_scores <- function(pitcher_statcast_df, game_date = NULL) {
 
   # 1. Define blocks
-  block_control   <- c('BB%', 'K%', 'K/9', 'BB/9', 'K-BB%', 'Chase%', 'Whiff%',
+  block_control   <- c('BB%', 'K%', 'K/9', 'BB/9', 'K-BB%', 'Chase%',
                        'Zone%', 'F-Strike%', 'CStr%', 'SwStr%', 'C+SwStr%')
   
-  block_contact   <- c('GB%', 'FB%', 'LD%', 'PU%', 'GB/FB', 'HR/FB', 'IFFB%',
+  block_contact   <- c('GB%', 'FB%', 'LD%', 'GB/FB', 'HR/FB', 'IFFB%',
                        'Barrel%', 'HardHit%', 'Z-Contact%', 'O-Contact%',
                        'Contact%', 'EV', 'LA')
   
